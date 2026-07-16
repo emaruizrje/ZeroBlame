@@ -1,7 +1,7 @@
 import logging
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from typing import List
 from contextlib import asynccontextmanager
 
@@ -28,6 +28,11 @@ app = FastAPI(
 logger = logging.getLogger("zeroblame")
 
 triage_service = TriageService()
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    return RedirectResponse(url="/dashboard")
 
 
 @app.post("/api/v1/webhooks/gcp", status_code=202)
