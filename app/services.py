@@ -44,10 +44,10 @@ class TriageService:
         """Obtiene todos los incidentes consumiendo el repositorio."""
         async with AsyncSessionLocal() as session:
             repo = SQLIncidentRepository(session)
-        return await repo.get_all()
+            return await repo.get_all()
 
     async def update_incident_status(self, incident_id:int , status:str )-> IncidentRecord:
         """Actualiza el estado del incidente"""
         async with AsyncSessionLocal() as session:
             repo = SQLIncidentRepository(session)
-        return await repo.update_status(incident_id, status)
+            return await repo.update_status(incident_id, status)

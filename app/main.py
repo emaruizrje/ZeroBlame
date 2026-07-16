@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from typing import List
@@ -23,6 +25,8 @@ app = FastAPI(
     version="0.2.0"
 )
 
+logger = logging.getLogger("zeroblame")
+
 triage_service = TriageService()
 
 
@@ -35,16 +39,19 @@ async def handle_gcp_webhook(payload: GCPWebhookPayload):
 
         result = await triage_service.execute(incident)
         return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        # El detalle queda en el log del servidor; al cliente no se le filtra info interna
+        logger.exception("Fallo procesando webhook de GCP")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/v1/incidents", response_model=List[IncidentResponse])
 async def get_incidents():
     try:
         return await triage_service.get_all_incidents()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Fallo consultando incidentes")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.patch("/api/v1/incidents/{incident_id}/status", response_model=IncidentResponse)
 async def update_status(incident_id: int, status:str):
@@ -54,10 +61,11 @@ async def update_status(incident_id: int, status:str):
     try:
         updated= await triage_service.update_incident_status(incident_id, status)
         return updated
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    except Exception:
+        logger.exception("Fallo actualizando estado del incidente %s", incident_id)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -71,6 +79,7 @@ async def serve_dashboard():
             <title>ZeroBlame | SRE Dashboard</title>
             <script src="https://cdn.tailwindcss.com"></script>
             <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
             <style>
                 body { background-color: #0f172a; color: #e2e8f0; }
                 .markdown-body h3 { font-size: 1.15rem; font-weight: bold; color: #38bdf8; margin-top: 1.25rem; margin-bottom: 0.5rem; }
@@ -99,6 +108,14 @@ async def serve_dashboard():
             </div>
 
             <script>
+                // Escape de HTML: todo dato que venga de la API se trata como texto plano,
+                // nunca como markup (el error_message llega desde webhooks externos)
+                function esc(value) {
+                    return String(value ?? '').replace(/[&<>"']/g, c => ({
+                        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+                    }[c]));
+                }
+
                 // Formateadores visuales para los estados y severidades
                 function getSeverityClasses(severity) {
                     const sev = (severity || '').toUpperCase();
@@ -165,7 +182,9 @@ async def serve_dashboard():
                         }
 
                         incidents.forEach(inc => {
-                            const parsedDiagnosis = marked.parse(inc.ai_diagnostics || "*No se registró diagnóstico.*");
+                            const parsedDiagnosis = DOMPurify.sanitize(
+                                marked.parse(inc.ai_diagnostics || "*No se registró diagnóstico.*")
+                            );
 
                             const card = `
                                 <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-xl overflow-hidden flex flex-col">
@@ -174,7 +193,7 @@ async def serve_dashboard():
                                     <div class="p-4 border-b border-slate-700 bg-slate-800/50 flex flex-wrap gap-2 justify-between items-center">
                                         <div class="flex flex-wrap gap-2">
                                             <span class="px-2.5 py-1 text-xs font-bold uppercase rounded border ${getSeverityClasses(inc.severity)}">
-                                                ${inc.severity}
+                                                ${esc(inc.severity)}
                                             </span>
                                             <span class="px-2.5 py-1 text-xs font-bold uppercase rounded border ${getStatusClasses(inc.status)}">
                                                 ● ${translateStatus(inc.status)}
@@ -187,12 +206,12 @@ async def serve_dashboard():
                                     <div class="p-5 flex-grow">
                                         <div class="flex items-center gap-2 mb-3">
                                             <span class="bg-indigo-500/10 text-indigo-300 text-xs px-2.5 py-0.5 rounded font-mono border border-indigo-500/20">
-                                                ${inc.environment}
+                                                ${esc(inc.environment)}
                                             </span>
-                                            <h2 class="text-xl font-bold text-white font-mono">${inc.service_name}</h2>
+                                            <h2 class="text-xl font-bold text-white font-mono">${esc(inc.service_name)}</h2>
                                         </div>
                                         <div class="mb-4 bg-rose-950/20 border-l-4 border-rose-500 p-3 rounded-r text-sm font-mono text-rose-300 break-words">
-                                            ${inc.error_message}
+                                            ${esc(inc.error_message)}
                                         </div>
                                         <div class="markdown-body bg-slate-900/60 p-4 rounded-lg border border-slate-700/60 text-sm">
                                             ${parsedDiagnosis}

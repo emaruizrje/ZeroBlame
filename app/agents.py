@@ -13,11 +13,17 @@ class SREAgent:
     """Agent encargado de realizar el diagnóstico técnico inicial de los incidentes."""
 
     def __init__(self):
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            # Fallar en el arranque, no en el primer request: sin key el diagnóstico
+            # de error se persistiría en DB como si fuera un análisis real
+            raise RuntimeError("GEMINI_API_KEY no está definida en el entorno (.env)")
+
         # Inicializamos Gemini (usamos gemini-3.5-flash por velocidad y costo cero)
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-3.1-flash-lite",
             temperature=0.2,  # Temperatura baja para respuestas técnicas y deterministas
-            google_api_key=os.getenv("GEMINI_API_KEY")
+            google_api_key=api_key
         )
 
         # Diseñamos el Prompt del SRE
